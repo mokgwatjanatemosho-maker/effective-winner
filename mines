@@ -1,0 +1,133 @@
+import random
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+
+TOKEN = "YOUR_TOKEN"
+
+GRID_SIZE = 25
+MINES_COUNT = 5
+
+users = {}
+games = {}
+
+def create_mines():
+    return random.sample(range(1, GRID_SIZE + 1), MINES_COUNT)
+
+def grid_text():
+    grid = ""
+    for i in range(1, GRID_SIZE + 1):
+        grid += f"{i:2} "
+        if i % 5 == 0:
+            grid += "\n"
+    return grid
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in users:
+        users[user_id] = {"balance": 1000}
+
+    await update.message.reply_text(
+        f"🎰 Welcome!\nBalance: {users[user_id]['balance']} coins\n"
+        "Use /play <bet> to start."
+    )
+
+async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id not in users:
+        users[user_id] = {"balance": 1000}
+
+    try:
+        bet = int(context.args[0])
+
+        if bet > users[user_id]["balance"]:
+            await update.message.reply_text("❌ Not enough coins.")
+            return
+
+        mines = create_mines()
+
+        games[user_id] = {
+            "bet": bet,
+            "mines": mines,
+            "safe": [],
+            "multiplier": 1.0
+        }
+
+        users[user_id]["balance"] -= bet
+
+        await update.message.reply_text(
+            f"💣 Game Started!\nBet: {bet}\n\n"
+            + grid_text()
+        )
+
+    except:
+        await update.message.reply_text(
+            "Usage: /play <bet>"
+        )
+
+async def choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id not in games:
+        await update.message.reply_text(
+            "Start game using /play <bet>"
+        )
+        return
+
+    try:
+        tile = int(update.message.text)
+
+        game = games[user_id]
+
+        if tile in game["mines"]:
+            await update.message.reply_text(
+                "💣 BOOM! You lost your bet."
+            )
+            del games[user_id]
+
+        else:
+            game["safe"].append(tile)
+            game["multiplier"] += 0.2
+
+            await update.message.reply_text(
+                f"✅ Safe! Multiplier: {game['multiplier']:.2f}\n"
+                "Type /cashout to collect winnings."
+            )
+
+    except:
+        await update.message.reply_text(
+            "Send tile number (1–25)"
+        )
+
+async def cashout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id not in games:
+        await update.message.reply_text("No active game.")
+        return
+
+    game = games[user_id]
+
+    winnings = int(game["bet"] * game["multiplier"])
+
+    users[user_id]["balance"] += winnings
+
+    await update.message.reply_text(
+        f"💰 Cashout successful!\n"
+        f"You won {winnings} coins.\n"
+        f"Balance: {users[user_id]['balance']}"
+    )
+
+    del games[user_id]
+
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("play", play))
+app.add_handler(CommandHandler("cashout", cashout))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, choose))
+
+print("🎰 Casino Mines Bot Running...")
+
+app.run_polling()
